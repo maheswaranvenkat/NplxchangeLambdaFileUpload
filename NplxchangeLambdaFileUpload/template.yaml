@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  NplxchangeLambdaFileUpload
+
+  Sample SAM Template for NplxchangeLambdaFileUpload
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 20
+    Runtime: java8
+    MemorySize: 512
+
+Resources:
+  #DLQ
+  NplxchangeCheckoutDLQ:
+    Type: AWS::SNS::Topic
+  NplxchangeNotificationDLQ:
+    Type: AWS::SNS::Topic
+  #S3
+  NplxchangeCheckoutBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-${AWS::AccountId}-${AWS::Region}
+  #SNS
+  NplxchangeNotificationTopic:
+    Type: AWS::SNS::Topic
+  NplxchangeCheckoutTopic:
+    Type: AWS::SNS::Topic
+  #LAMBDA 1
+  NplxchangeFileScanFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: NplxchangeLambdaFileUpload
+      Handler: com.nplxhange.aws.lambda.function.NplxchangeFileScanLambda::handler
+      DeadLetterQueue:
+        Type: SNS
+        TargetArn: !Ref NplxchangeCheckoutDLQ
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub ${AWS::StackName}-${AWS::AccountId}-${AWS::Region}
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt NplxchangeCheckoutTopic.TopicName
+      Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
+        Variables:
+          NPLXCHANGE_CHECKOUT_TOPIC: !Ref NplxchangeCheckoutTopic
+      Events:
+        S3Event:
+          Type: S3 # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Bucket: !Ref NplxchangeCheckoutBucket
+            Events: s3:ObjectCreated:*
+  #LAMBDA 2
+  NplxchangeFileValidationFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: NplxchangeLambdaFileUpload
+      Handler: com.nplxhange.aws.lambda.function.NplxchangeFileValidationLambda::handler
+      DeadLetterQueue:
+        Type: SNS
+        TargetArn: !Ref NplxchangeNotificationDLQ
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt NplxchangeNotificationTopic.TopicName
+      Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
+        Variables:
+          NPLXCHANGE_NOTIFICATION_TOPIC: !Ref NplxchangeNotificationTopic
+      Events:
+        SNSEvent:
+          Type: SNS # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Topic: !Ref NplxchangeCheckoutTopic
+  #LAMBDA 3
+  NplxchangeFileNotificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: NplxchangeLambdaFileUpload
+      Handler: com.nplxhange.aws.lambda.function.NplxchangeFileNotificationLambda::handler
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic: !Ref NplxchangeNotificationTopic
+  #LAMBDA 4 Error Handling
+  ErrorHandlingFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: NplxchangeLambdaFileUpload
+      Handler: com.nplxhange.aws.lambda.function.errorhandling.ErrorHandler::handler
+      Events:
+        SNSEvent:
+          Type: SNS # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Topic: !Ref NplxchangeCheckoutDLQ
+
+  NotificationErrorHandlingFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: NplxchangeLambdaFileUpload
+      Handler: com.nplxhange.aws.lambda.function.errorhandling.NotificationErrorHandler::handler
+      Events:
+        SNSEvent:
+          Type: SNS # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Topic: !Ref NplxchangeNotificationDLQ
+
+Outputs:
+  NplxchangeFileScanFunction:
+    Description: "Create Order Lambda Function ARN"
+    Value: !GetAtt NplxchangeFileScanFunction.Arn
+  NplxchangeFileValidationFunction:
+    Description: "Create Order Lambda Function IAM Role ARN"
+    Value: !GetAtt NplxchangeFileValidationFunction.Arn
